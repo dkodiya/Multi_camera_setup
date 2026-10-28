@@ -1,0 +1,70 @@
+import cv2
+import numpy as np
+
+# Map the active video stream indices for your 4 physical webcams.
+# Based on your previous output, these will use the even-numbered nodes.
+camera_indices = [0, 2, 4, 6]
+caps = []
+
+# Initialize all 4 cameras
+for idx in camera_indices:
+    cap = cv2.VideoCapture(idx, cv2.CAP_V4L2)
+    if not cap.isOpened():
+        print(f"⚠️ Warning: Could not open camera at /dev/video{idx}")
+        continue
+
+    # CRITICAL: Force the cameras to use MJPEG compression.
+    # This prevents overloading the UP Squared's USB controller bandwidth.
+    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    cap.set(cv2.CAP_PROP_FPS, 15)  # 15 FPS is smooth enough for monitoring displays
+    caps.append(cap)
+
+print(f"✅ Active Cameras Connected: {len(caps)}/4")
+print("Press 'q' inside the video window to safely quit.")
+
+while True:
+    frames = []
+
+    # Loop through and capture a frame from each camera
+    for i, cap in enumerate(caps):
+        ret, frame = cap.read()
+        if not ret:
+            # If any single camera drops off, generate a red offline frame so the grid doesn't break
+            frame = np.zeros((480, 640, 3), dtype=np.uint8)
+            cv2.putText(frame, f"Display {i+1} OFFLINE", (140, 240),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+        else:
+            # Overlay a green label identifying which screen this camera is monitoring
+            cv2.putText(frame, f"Display {i+1} Active", (20, 40),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+        frames.append(frame)
+
+    # Pad with placeholders if less than 4 physical cameras are functional at runtime
+    while len(frames) < 4:
+        missing_idx = len(frames) + 1
+        placeholder = np.zeros((480, 640, 3), dtype=np.uint8)
+        cv2.putText(placeholder, f"Waiting for Cam {missing_idx}...", (160, 240),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (100, 100, 100), 2)
+        frames.append(placeholder)
+
+    # Compile the 4 frames into a perfect 2x2 grid layout
+    # Top Row: Cam 1 | Cam 2
+    # Bottom Row: Cam 3 | Cam 4
+    top_row = np.hstack((frames[0], frames[1]))
+    bottom_row = np.hstack((frames[2], frames[3]))
+    grid = np.vstack((top_row, bottom_row))
+
+    # Display the compiled monitor grid window
+    cv2.imshow("Multi-Display Monitor Hub (4-Cam Setup)", grid)
+
+    # Wait 1ms for user input. If 'q' is pressed, break the loops
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+# Safely close everything down
+for cap in caps:
+    cap.release()
+cv2.destroyAllWindows()
+print("👋 Program closed down successfully.")
